@@ -27,11 +27,11 @@ class Ping:
         header = struct.pack(
             "!BBHHH", ICMP_ECHO_REQUEST, 0, checksum, identification, 1
         )
-        padBytes = []
-        startVal = 0x42
-        for i in range(startVal, startVal + (self.packetsize)):
-            padBytes += [(i & 0xff)]
-        data = bytes(padBytes)
+        pad_bytes = []
+        start_val = 0x42
+        for i in range(startVal, startVal + self.packetsize):
+            pad_bytes += [(i & 0xff)]
+        data = bytes(pad_bytes)
         checksum = self.checksum(header + data)
         header = struct.pack(
             "!BBHHH", ICMP_ECHO_REQUEST, 0, checksum, identification, 1
@@ -82,7 +82,7 @@ class Ping:
         # receive
         timeout = self.timeout / 1000.0
 
-        while True:  # Loop while waiting for packet or timeout
+        while True:
             select_start = time()
             inputready, outputready, exceptready = select.select([self.s], [], [], timeout)
             select_duration = time() - select_start
@@ -93,16 +93,14 @@ class Ping:
 
             packet_data, address = self.s.recvfrom(2048)
 
-            icmp_header = self.header2dict(
-                names=[
-                    "type", "code", "checksum",
-                    "packet_id", "seq_number"
-                ],
-                struct_format="!BBHHH",
-                data=packet_data[20:28]
+            icmp_header_dict = dict(
+                zip(
+                    names=["type", "code", "checksum", "packet_id", "seq_number"],
+                    data=struct.unpack("!BBHHH", packet_data[20:28])
+                )
             )
 
-            if icmp_header["packet_id"] == identification:
+            if icmp_header_dict["packet_id"] == identification:
                 return sent_time, receive_time
 
             timeout = timeout - select_duration
