@@ -1,7 +1,15 @@
+#!/usr/bin/python2.7
+# jmp1617 - Traceroute
+# Python 2.7
+
 import socket
 import argparse
 import time
 import struct
+import os
+
+
+ICMP_ECHO_REQUEST = 8
 
 
 def parse_args():
@@ -32,7 +40,8 @@ def parse_args():
     parser.add_argument(
         "-S",
         "--summery",
-        help="Print a summary of how many probes were not answered for each hop."
+        help="Print a summary of how many probes were not answered for each hop.",
+        action="store_true"
     )
     return parser.parse_args()
 
@@ -46,16 +55,19 @@ class Traceroute:
         self.tries = args.nqueries
         self.show_summary = args.summery
         self.ttl = 1
-        self.port = 33434
-        self.destination_ip = socket.gethostbyname(self.destination)
-        print(self.destination_ip)
+        self.packet_size = 60  # UDP payload size
+        self.port = 33434  # UDP port to use
+        self.destination_ip = socket.gethostbyname(self.destination)  # get the ip from the host
 
     def run(self):
-        while self.ttl < self.max_ttl:
-            start_time = time.time()
-
+        print("Traceroute to {} ({}), {} max hops, {} byte packets".format(
+            self.destination, self.destination_ip, self.max_ttl, self.packet_size
+        ))
+        destination_reached = False
+        # until the destination is reached or the max hops has been reached
+        while self.ttl < self.max_ttl and not destination_reached:
             # receiver socket setup
-            rec_socket = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
+            rec_socket = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.getprotobyname("icmp"))
             # set timeout
             timeout = struct.pack("ll", 5, 0)
             rec_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVTIMEO, timeout)
@@ -63,37 +75,84 @@ class Traceroute:
             rec_socket.bind(('', self.port))
 
             # sender socket setup
-            send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-            send_socket.setsockopt(socket.SOL_IP, socket.IP_TTL, self.ttl)
+            send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.getprotobyname("udp"))
+            send_socket.setsockopt(socket.SOL_IP, socket.IP_TTL, self.ttl)  # specify the ttl
 
-            # probe
-            send_socket.sendto(b'', (self.destination, self.port))
-
-            address = None
+            addresses = []
             complete = False
             tries = self.tries
-            try_string = ""
+            failed_tries = 0
+            # try tries amount of times to probe an intermediate
             while tries > 0 and not complete:
                 try:
-                    _, address = rec_socket.recvfrom(1024)
-                    end_time = time.time()
-                    complete = True;
-                except socket.error:
+                    start_time = time.time()  # track start time
+                    send_socket.sendto(b'A' * self.packet_size, (self.destination, self.port))  # send a packet_size udp
+                    _, address = rec_socket.recvfrom(2048)  # try to catch the hop limit reached icmp message from hop
+                    end_time = time.time()  # capture the end time
                     tries = tries - 1
-                    try_string += "* "
+                    addresses.append((address[0], start_time, end_time))  # store the info gathered for printing
+                except socket.error:  # if socket timed out or no response
+                    tries = tries - 1
+                    failed_tries += 1
+                    addresses.append((0, 0, 0))  # store a loss
 
+            # reset the sockets for next ttl
             rec_socket.close()
             send_socket.close()
 
-            if address:
-                round_trip = round((end_time - start_time) * 1000, 1)
-                print('{:<4} {} {} ms'.format(self.ttl, address[0], round_trip))
-                if address[0] == self.destination_ip:
-                    # done
-                    break
-            else:
-                print("{:<4} {}".format(self.ttl, try_string))
+            # check to see if the responding servers are all the same
+            all_same = True
+            temp_address = addresses[0][0]
+            for address in addresses:
+                if temp_address != address[0]:
+                    all_same = False
 
+            # if they are all the same, condense the print line
+            if all_same:
+                if temp_address == 0:
+                    line = "{} ".format(self.ttl)
+                    for _ in addresses:
+                        line = line + "* "
+                else:
+                    if self.print_numerical:
+                        line = "{} {} ".format(self.ttl, temp_address)
+                    else:
+                        try:
+                            host = socket.gethostbyaddr(temp_address)[0]
+                        except Exception:
+                            host = temp_address
+                        line = "{} {} ({}) ".format(self.ttl, host, temp_address)
+                    for address in addresses:
+                        line = line + "{} ms ".format(round((address[2]-address[1])*1000, 2))
+            # if they are not all the same, print info on each
+            else:
+                line = "{} ".format(self.ttl)
+                for address in addresses:
+                    if address[0] == 0:
+                        line = line + "* "
+                    else:
+                        if self.print_numerical:
+                            line = line + "{} {} ms ".format(address[0], round((address[2]-address[1])*1000, 2))
+                        else:
+                            try:
+                                host = socket.gethostbyaddr(adress[0])[0]
+                            except Exception:
+                                host = address[0]
+                            line = line + "{} ({}) {} ms ".format(address[0], host, round((address[2]-address[1])*1000, 2))
+
+            # append loss info
+            if self.show_summary:
+                line = line + "({}% loss)".format(round((float(failed_tries) / self.tries)*100, 2))
+
+            print(line)
+
+            # check to see if the initial destination has been reached
+            for address in addresses:
+                if address[0] == self.destination_ip:
+                    destination_reached = True
+                    break
+
+            # up the ttl one hop
             self.ttl += 1
 
 

@@ -8,7 +8,6 @@ import select
 import struct
 
 
-INTERFACE = "wlp4s0"
 ICMP_ECHO_REQUEST = 8
 
 
