@@ -59,11 +59,17 @@ def parse_args():
 class Ping:
     def __init__(self):
         args = parse_args()
-        self.destination = args.destination
+        self.host = args.destination
+        self.destination = socket.gethostbyname(args.destination)
         self.count = args.count
         self.wait = args.wait
         self.packetsize = args.packetsize
         self.timeout = args.timeout
+        self.transmitted = 0
+        self.received = 0
+        self.total_time = 0
+        if self.timeout < 30:
+            self.timeout = 30
         self.s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.getprotobyname("icmp"))  # init socket
 
     def craft_packet(self, identification, sequence):
@@ -80,6 +86,7 @@ class Ping:
 
     # helper to print the results line
     def display_results_line(self, res):
+        self.total_time += round((res[1] - res[0]) * 1000, 1)
         print(
             "{} bytes from {}: icmp_seq={} ttl={} time={} ms".format(
                 res[2],
@@ -97,6 +104,7 @@ class Ping:
         packet = self.craft_packet(identification, sequence)
         try:
             self.s.sendto(packet, (self.destination, 1))
+            self.transmitted += 1
         except socket.error as e:
             print("Unable to resolve " + self.destination + str(e))
             exit()
@@ -114,32 +122,36 @@ class Ping:
             receive_time = time.time()  # store time of reception
             packet_data, address = self.s.recvfrom(2048)  # recieve the data
 
-            # Extract fields we want from the icmp header
+            # convert received data to dictionary for easy access
             icmp_header_dict = dict(
                 zip(
                     [
-                        "packet_id", "seq_number"  # only need id and seq for now
+                        "type", "code", "checksum", "packet_id", "seq_number"
                     ],
                     struct.unpack("!BBHHH", packet_data[20:28])
                 )
             )
-            # Unpack the ip header in case its needed for printing with fields needed
+            # unpack the ip header and convert to dict
             ip_header_dict = dict(
                 zip(
                     [
-                        "ttl"  # only need ttl for now
+                        "version", "type", "length", "id", "flags", "ttl", "protocol", "checksum", "src_ip", "dest_ip"
                     ],
                     struct.unpack("!BBHHHBBHII", packet_data[:20])
                 )
             )
             if icmp_header_dict["packet_id"] == identification:  # this matches the packet we sent
                 # return data for printing
+                self.received += 1
                 return sent_time, receive_time, len(packet_data) - 20, icmp_header_dict, ip_header_dict
             timeout = timeout - select_time  # if timeout is reached, return
             if timeout <= 0:
                 return sent_time, None, None, None, None  # times out return
 
     def run(self):
+        print("PING {} ({}) {}({}) bytes of data.".format(
+            self.host, self.destination, self.packetsize, self.packetsize+28
+        ))
         seq = 1
         packets = self.count
         # default self.count is -1 so while will run forever else will reach zero
@@ -154,6 +166,13 @@ class Ping:
             time.sleep(self.wait)  # wait the designated wait time
             seq += 1  # update sequence num
             packets -= 1  # update count
+        print("--- {} ping statistics ---".format(self.host))
+        print("{} packets transmitted, {} received, {}% packet loss, time {}ms".format(
+            self.transmitted,
+            self.received,
+            round((float(self.transmitted - self.received) / self.transmitted) * 100),
+            self.total_time
+        ))
 
 
 if __name__ == '__main__':
