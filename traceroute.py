@@ -9,9 +9,6 @@ import struct
 import os
 
 
-ICMP_ECHO_REQUEST = 8
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description='Python Traceroute Utility')
     parser.add_argument(
@@ -148,7 +145,8 @@ class Traceroute:
 
             # check to see if the initial destination has been reached
             for address in addresses:
-                if address[0] == self.destination_ip:
+                # sometimes resolution changes mid run, recheck hosts ip
+                if address[0] == socket.gethostbyname(self.destination):
                     destination_reached = True
                     break
 

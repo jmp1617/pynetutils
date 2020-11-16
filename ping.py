@@ -1,4 +1,7 @@
-#!/bin/bin/python
+#!/usr/bin/python2.7
+# jmp1617 - Ping
+# Python 2.7
+
 import argparse
 import socket
 import time
