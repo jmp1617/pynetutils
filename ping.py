@@ -53,9 +53,6 @@ def parse_args():
     return parser.parse_args()
 
 
-
-
-
 class Ping:
     def __init__(self):
         args = parse_args()
@@ -94,7 +91,11 @@ class Ping:
         identification = os.getpid()+1000 & 0xFFFF
         # send
         packet = self.craft_packet(identification, sequence)
-        self.s.sendto(packet, (self.destination, 1))
+        try:
+            self.s.sendto(packet, (self.destination, 1))
+        except socket.error as e:
+            print("Unable to resolve " + self.destination + str(e))
+            exit()
 
         sent_time = time.time()
         # receive
