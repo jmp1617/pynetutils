@@ -15,7 +15,8 @@ ICMP_ECHO_REQUEST = 8
 
 
 def checksum(source_string):
-    # calculate checksum as per ping.c spec documentation
+    # calculate checksum as per ping.c + spec documentation
+    # correctness tested with wireshark
     count_to = (int(len(source_string) / 2)) * 2
     total = 0
     count = 0
@@ -63,7 +64,7 @@ class Ping:
         self.wait = args.wait
         self.packetsize = args.packetsize
         self.timeout = args.timeout
-        self.s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.getprotobyname("icmp"))
+        self.s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.getprotobyname("icmp"))  # init socket
 
     def craft_packet(self, identification, sequence):
         check = 0  # use an empty checksum value to create a mirror header in order to calculate the checksum
@@ -75,8 +76,9 @@ class Ping:
         header = struct.pack(  # generate the correct header
             "!BBHHH", ICMP_ECHO_REQUEST, 0, check, identification, sequence
         )
-        return header + data
+        return header + data  # return the packet
 
+    # helper to print the results line
     def display_results_line(self, res):
         print(
             "{} bytes from {}: icmp_seq={} ttl={} time={} ms".format(
@@ -84,7 +86,7 @@ class Ping:
                 self.destination,
                 res[3]['seq_number'],
                 res[4]['ttl'],
-                round((res[1] - res[0]) * 1000, 1)
+                round((res[1] - res[0]) * 1000, 1)  # get round trip time
             )
         )
 
@@ -101,56 +103,59 @@ class Ping:
 
         sent_time = time.time()
         # receive
-        timeout = self.timeout / 1000.0
+        timeout = self.timeout / 1000.0  # get correct unit
         # loop until we get a response with our identification number
         while True:
             select_start = time.time()  # use select to keep track of timeout
             input_ready, o, e = select.select([self.s], [], [], timeout)
             select_time = time.time() - select_start
-            if not input_ready:  # if input fails
+            if not input_ready:  # if input fails return
                 return sent_time, -1, None, None, None
-            receive_time = time.time()
-            packet_data, address = self.s.recvfrom(2048)
+            receive_time = time.time()  # store time of reception
+            packet_data, address = self.s.recvfrom(2048)  # recieve the data
 
-            # Extract the icmp header
+            # Extract fields we want from the icmp header
             icmp_header_dict = dict(
                 zip(
-                    ["type", "code", "checksum", "packet_id", "seq_number"],
+                    [
+                        "packet_id", "seq_number"  # only need id and seq for now
+                    ],
                     struct.unpack("!BBHHH", packet_data[20:28])
                 )
             )
-            # Unpack the ip header in case its needed for printing
+            # Unpack the ip header in case its needed for printing with fields needed
             ip_header_dict = dict(
                 zip(
                     [
-                        "version", "type", "length", "id", "flags", "ttl", "protocol", "checksum", "src_ip", "dest_ip"
+                        "ttl"  # only need ttl for now
                     ],
                     struct.unpack("!BBHHHBBHII", packet_data[:20])
                 )
             )
             if icmp_header_dict["packet_id"] == identification:  # this matches the packet we sent
-                return sent_time, receive_time, len(packet_data) - 20, icmp_header_dict, ip_header_dict  # return data for printing
+                # return data for printing
+                return sent_time, receive_time, len(packet_data) - 20, icmp_header_dict, ip_header_dict
             timeout = timeout - select_time  # if timeout is reached, return
             if timeout <= 0:
-                return sent_time, None, None, None, None  # times out
+                return sent_time, None, None, None, None  # times out return
 
     def run(self):
         seq = 1
         packets = self.count
+        # default self.count is -1 so while will run forever else will reach zero
         while packets != 0:
-            result = self.ping(seq)
+            result = self.ping(seq)  # send a ping
             if result[1] == -1:
                 print("Unreachable")
             elif result[1] is None:
                 print("Timeout")
             else:
-                self.display_results_line(result)
-            time.sleep(self.wait)
-            seq += 1
-            packets -= 1
+                self.display_results_line(result)  # display the results
+            time.sleep(self.wait)  # wait the designated wait time
+            seq += 1  # update sequence num
+            packets -= 1  # update count
 
 
 if __name__ == '__main__':
     PingInstance = Ping()
     PingInstance.run()
-
